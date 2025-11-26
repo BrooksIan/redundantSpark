@@ -1,0 +1,65 @@
+services:
+  spark-master:
+    image: apache/spark:4.1.0-preview4-scala2.13-java21-python3-r-ubuntu
+    container_name: spark-master
+    hostname: spark-master
+    command: >
+      bash -c "
+      export SPARK_HOME=/opt/spark &&
+      pip install -q -r /app/requirements.txt 2>/dev/null || true &&
+      /opt/spark/sbin/start-master.sh &&
+      tail -f /opt/spark/logs/spark-*-org.apache.spark.deploy.master.Master-*.out
+      "
+    environment:
+      - SPARK_HOME=/opt/spark
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+    ports:
+      - "8080:8080"  # Spark Master Web UI
+      - "7077:7077"  # Spark Master port
+      - "6066:6066"  # Spark REST API
+    volumes:
+      - .:/app
+      - spark-master-data:/tmp/spark-work
+    networks:
+      - spark-network
+    working_dir: /app
+
+  spark-worker:
+    image: apache/spark:4.1.0-preview4-scala2.13-java21-python3-r-ubuntu
+    container_name: spark-worker
+    hostname: spark-worker
+    command: >
+      bash -c "
+      export SPARK_HOME=/opt/spark &&
+      pip install -q -r /app/requirements.txt 2>/dev/null || true &&
+      /opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
+      tail -f /opt/spark/logs/spark-*-org.apache.spark.deploy.worker.Worker-*.out
+      "
+    environment:
+      - SPARK_HOME=/opt/spark
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_WORK_DIR=/tmp/spark-work
+    ports:
+      - "8081:8081"  # Spark Worker Web UI
+    volumes:
+      - .:/app
+      - spark-worker-data:/tmp/spark-work
+    depends_on:
+      - spark-master
+    networks:
+      - spark-network
+    working_dir: /app
+
+volumes:
+  spark-master-data:
+  spark-worker-data:
+
+networks:
+  spark-network:
+    driver: bridge
+

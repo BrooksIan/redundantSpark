@@ -1,0 +1,5 @@
+# pyspark is already included in the apache/spark image
+python-Levenshtein>=0.21.0
+fuzzywuzzy>=0.18.0
+rapidfuzz>=3.0.0
+
