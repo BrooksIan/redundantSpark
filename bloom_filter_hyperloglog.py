@@ -18,21 +18,58 @@ import os
 
 
 def create_spark_session(app_name="BloomFilterHyperLogLog", master_url=None):
-    """Create and configure Spark session."""
+    """
+    Create and configure Spark session.
+    
+    Supports multiple environments:
+    - Cloudera AI Workbench: Uses existing SparkSession if available, or creates with minimal config
+    - Docker/Standalone: Configures for standalone Spark cluster
+    - Local: Uses local mode
+    """
     import os
+    
+    # Check if running in Cloudera AI Workbench
+    is_cloudera = (
+        os.getenv("CDSW_PROJECT_ID") is not None or
+        os.getenv("CDSW_APP_ID") is not None or
+        os.getenv("CLOUDERA_AI_WORKBENCH") is not None or
+        os.path.exists("/var/lib/cdsw") or
+        os.path.exists("/home/cdsw")
+    )
+    
+    # In Cloudera AI Workbench, try to use existing SparkSession first
+    if is_cloudera:
+        try:
+            from pyspark.sql import SparkSession
+            existing_spark = SparkSession.getActiveSession()
+            if existing_spark is not None:
+                print(f"Using existing SparkSession in Cloudera AI Workbench")
+                return existing_spark
+        except:
+            pass
     
     builder = SparkSession.builder \
         .appName(app_name) \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
     
-    # Connect to Spark master if running in Docker or master_url is provided
-    if master_url:
-        builder = builder.master(master_url)
-    elif os.getenv("SPARK_MASTER"):
-        builder = builder.master(os.getenv("SPARK_MASTER"))
-    elif os.path.exists("/opt/spark"):  # Running in Spark Docker container
-        builder = builder.master("spark://spark-master:7077")
+    # Determine master URL
+    master = master_url or os.getenv("SPARK_MASTER")
+    
+    # Cloudera AI Workbench: Don't set master, let platform manage it
+    if is_cloudera:
+        pass  # Platform manages configuration
+    elif not master and os.path.exists("/opt/spark"):  # Running in Spark Docker container
+        master = "spark://spark-master:7077"
+    
+    # Connect to Spark master if specified (not in Cloudera)
+    if master and not is_cloudera:
+        builder = builder.master(master)
+        # Add authentication secret if connecting to a standalone cluster
+        if master.startswith("spark://"):
+            auth_secret = os.getenv("SPARK_AUTHENTICATE_SECRET", "spark-secret-key")
+            builder = builder.config("spark.authenticate.secret", auth_secret)
+            builder = builder.config("spark.authenticate", "true")
     
     return builder.getOrCreate()
 

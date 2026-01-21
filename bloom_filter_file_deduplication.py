@@ -16,22 +16,141 @@ import glob
 import hashlib
 
 
+def is_cloudera_environment():
+    """Check if running in Cloudera AI Workbench or similar environment."""
+    return (
+        os.getenv("CDSW_PROJECT_ID") is not None or
+        os.getenv("CDSW_APP_ID") is not None or
+        os.getenv("CLOUDERA_AI_WORKBENCH") is not None or
+        os.path.exists("/var/lib/cdsw") or
+        os.path.exists("/home/cdsw")
+    )
+
+
+def get_default_output_dir():
+    """
+    Get default output directory based on environment.
+    In Cloudera AI Workbench, defaults to /tmp/results (accessible by all executors).
+    Otherwise, defaults to local 'data' directory.
+    """
+    if is_cloudera_environment():
+        return "/tmp/results"
+    else:
+        return "data"
+
+
+def normalize_output_dir(output_dir):
+    """
+    Normalize output directory for the current environment.
+    Defaults to /tmp/results in Cloudera (accessible by all executors).
+    """
+    if output_dir is None:
+        return get_default_output_dir()
+    
+    # If already has protocol, use as-is
+    if output_dir.startswith(("hdfs://", "s3://", "s3a://", "s3n://", "file://")):
+        return output_dir
+    
+    # For relative paths in Cloudera, convert to /tmp/results
+    if is_cloudera_environment() and not os.path.isabs(output_dir):
+        if output_dir == "results" or output_dir == "data":
+            return "/tmp/results"
+        else:
+            return f"/tmp/{output_dir}"
+    
+    # For absolute paths that look like local filesystem paths, use as-is
+    if output_dir.startswith(("/tmp", "/var", "/opt", "/usr")):
+        return output_dir
+    
+    # For /home paths in Cloudera, convert to /tmp to ensure executors can access
+    if is_cloudera_environment() and output_dir.startswith("/home"):
+        basename = os.path.basename(output_dir) or "results"
+        return f"/tmp/{basename}"
+    
+    # For other absolute paths (like /user/...), convert to /tmp/results
+    if is_cloudera_environment() and output_dir.startswith("/user"):
+        return "/tmp/results"
+    
+    # Otherwise return as-is (local filesystem)
+    return output_dir
+
+
+def ensure_output_path(output_path):
+    """
+    Ensure output path is valid for the storage system.
+    For distributed storage (HDFS/S3), paths are created automatically by Spark.
+    For local filesystem, create directory if needed.
+    """
+    # If using distributed storage, Spark will create directories automatically
+    if output_path.startswith(("hdfs://", "s3://", "s3a://", "s3n://")):
+        return
+    
+    # For local filesystem, create parent directory on driver node
+    try:
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+            print(f"Created output directory: {parent_dir}")
+            # Set permissions to be accessible by all (important for distributed executors)
+            if is_cloudera_environment() and parent_dir.startswith("/tmp"):
+                try:
+                    os.chmod(parent_dir, 0o777)
+                except:
+                    pass  # Ignore permission errors
+    except Exception as e:
+        print(f"Note: Could not create directory {parent_dir}: {e}")
+        pass
+
+
 def create_spark_session(app_name="BloomFilterFileDeduplication", master_url=None):
-    """Create and configure Spark session."""
-    import os
+    """
+    Create and configure Spark session.
+    
+    Supports multiple environments:
+    - Cloudera AI Workbench: Uses existing SparkSession if available, or creates with minimal config
+    - Docker/Standalone: Configures for standalone Spark cluster
+    - Local: Uses local mode
+    """
+    # Check if running in Cloudera AI Workbench
+    is_cloudera = is_cloudera_environment()
+    
+    # In Cloudera AI Workbench, try to use existing SparkSession first
+    if is_cloudera:
+        try:
+            from pyspark.sql import SparkSession
+            existing_spark = SparkSession.getActiveSession()
+            if existing_spark is not None:
+                print(f"Using existing SparkSession in Cloudera AI Workbench")
+                return existing_spark
+        except:
+            pass
     
     builder = SparkSession.builder \
         .appName(app_name) \
         .config("spark.sql.adaptive.enabled", "true") \
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
     
-    # Connect to Spark master if running in Docker or master_url is provided
-    if master_url:
-        builder = builder.master(master_url)
-    elif os.getenv("SPARK_MASTER"):
-        builder = builder.master(os.getenv("SPARK_MASTER"))
-    elif os.path.exists("/opt/spark"):  # Running in Spark Docker container
-        builder = builder.master("spark://spark-master:7077")
+    # Determine master URL
+    master = master_url or os.getenv("SPARK_MASTER")
+    
+    # Cloudera AI Workbench: Don't set master, let platform manage it
+    if is_cloudera:
+        # Cloudera manages Spark configuration, but if Spark requires authentication,
+        # we need to provide a secret (can be overridden via environment variable)
+        auth_secret = os.getenv("SPARK_AUTHENTICATE_SECRET", "cloudera-default-secret")
+        builder = builder.config("spark.authenticate.secret", auth_secret)
+        builder = builder.config("spark.authenticate", "true")
+    elif not master and os.path.exists("/opt/spark"):  # Running in Spark Docker container
+        master = "spark://spark-master:7077"
+    
+    # Connect to Spark master if specified (not in Cloudera)
+    if master and not is_cloudera:
+        builder = builder.master(master)
+        # Add authentication secret if connecting to a standalone cluster
+        if master.startswith("spark://"):
+            auth_secret = os.getenv("SPARK_AUTHENTICATE_SECRET", "spark-secret-key")
+            builder = builder.config("spark.authenticate.secret", auth_secret)
+            builder = builder.config("spark.authenticate", "true")
     
     return builder.getOrCreate()
 
@@ -228,7 +347,7 @@ def bloom_filter_file_deduplication(spark, existing_files, new_files, hash_type=
     return df_unique_new.select('file_path', 'file_name', 'file_size', 'file_hash')
 
 
-def exact_file_deduplication(spark, file_paths, hash_type='md5', output_dir="data"):
+def exact_file_deduplication(spark, file_paths, hash_type='md5', output_dir=None):
     """
     Exact file deduplication using full hash computation.
     
@@ -238,11 +357,13 @@ def exact_file_deduplication(spark, file_paths, hash_type='md5', output_dir="dat
         spark: SparkSession
         file_paths: List of file paths
         hash_type: Hash algorithm to use
-        output_dir: Directory to save results
+        output_dir: Directory to save results (defaults based on environment)
     
     Returns:
         Tuple of (unique_files_df, duplicate_groups_df)
     """
+    # Normalize output directory for current environment
+    output_dir = normalize_output_dir(output_dir)
     print(f"\n{'='*70}")
     print("EXACT FILE DEDUPLICATION")
     print(f"{'='*70}")
@@ -316,7 +437,10 @@ def exact_file_deduplication(spark, file_paths, hash_type='md5', output_dir="dat
     
     # Save results
     if output_dir:
-        output_path = os.path.join(output_dir, "file_deduplication_results.parquet")
+        # Use forward slash for path joining (works for both local and distributed)
+        output_path = f"{output_dir.rstrip('/')}/file_deduplication_results.parquet"
+        # Ensure output path is valid (creates local dirs if needed)
+        ensure_output_path(output_path)
         print(f"\nSaving results to: {output_path}")
         df_unique_files.write.mode('overwrite').parquet(output_path)
     

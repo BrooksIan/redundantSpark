@@ -1,315 +1,260 @@
-# redundantSpark
+# Data Deduplication Lab with Apache Spark
 
-A project for generating redundant datasets and demonstrating Apache Spark best practices for deduplication and handling redundant data.
+A hands-on lab for learning data deduplication techniques using Apache Spark in Cloudera AI Workbench.
 
-## Overview
+## Lab Overview
 
-This project provides:
-- **Dataset Generation**: Scripts to generate CSV files with intentional duplicates and variations
-- **File Generation**: Scripts to generate duplicate files for testing file-level deduplication
-- **Deduplication Guide**: Comprehensive guide on Apache Spark deduplication techniques
-- **Deduplication Scripts**: Ready-to-use Spark scripts for various deduplication strategies
+This lab teaches you how to:
+- **Identify and remove duplicate records** from datasets using various Spark techniques
+- **Compare different deduplication methods** and understand when to use each
+- **Work with large datasets** efficiently using distributed processing
+- **Use approximate methods** (Bloom Filters, HyperLogLog) for memory-efficient duplicate detection
+- **Perform file-level deduplication** to find duplicate files by content
 
-## Requirements
+## Prerequisites
 
-- **Apache Spark**: 3.3.0 or greater
-- **Python**: 3.8+
-- **Docker & Docker Compose** (for containerized setup)
+- Access to **Cloudera AI Workbench** (or similar Spark environment)
+- Basic Python knowledge
+- Familiarity with data processing concepts
 
-## Getting Started
+## Quick Start
 
-This project uses Apache Spark 3.3.0 with Hadoop 3. The easiest way to get started is using Docker Compose.
+### Step 1: Upload Files to Cloudera AI Workbench
 
-## Installation
+Upload the following files to your Cloudera AI Workbench project:
 
-### Using Docker Compose (Recommended)
+**Required Core Scripts:**
+- `deduplicate_spark.py` - Main deduplication script
+- `generate_dataset.py` - Dataset generation script
+- `bloom_filter_hyperloglog.py` - Approximate methods demonstration
+- `bloom_filter_file_deduplication.py` - File-level deduplication
 
-Start the Spark cluster (master + worker):
-```bash
-docker-compose up -d
+**Recommended:**
+- `notebooks/` directory - Jupyter notebooks for guided exercises (recommended way to learn)
+- `examples/` directory - Example scripts for reference
+
+### Step 1a: Using Jupyter Notebooks (Recommended)
+
+The easiest way to get started is using the provided Jupyter notebooks:
+
+1. **Start with**: `notebooks/00_Getting_Started.ipynb` - Setup and introduction
+2. **Then complete**: 
+   - `notebooks/01_Basic_Deduplication.ipynb` - Exercise 1
+   - `notebooks/02_Compare_Methods.ipynb` - Exercise 2
+   - `notebooks/03_Approximate_Methods.ipynb` - Exercise 3
+   - `notebooks/04_File_Level_Deduplication.ipynb` - Exercise 4
+
+The notebooks provide step-by-step guidance with code cells you can run directly.
+
+### Step 2: Generate Sample Data
+
+```python
+# Generate a dataset with duplicates
+python generate_dataset.py 1000 data/redundant_data.csv
 ```
 
-View logs:
-```bash
-docker-compose logs -f
+### Step 3: Run Deduplication
+
+```python
+from deduplicate_spark import create_spark_session, process_file_spark
+
+# Create Spark session (automatically configured for Cloudera)
+spark = create_spark_session("DeduplicationLab")
+
+# Process the file using exact deduplication
+stats = process_file_spark(
+    spark,
+    "data/redundant_data.csv",
+    output_dir=None,  # Uses /tmp/results in Cloudera
+    method='exact'
+)
+
+spark.stop()
 ```
 
-Stop the cluster:
-```bash
-docker-compose down
+## Lab Exercises
+
+### Exercise 1: Basic Deduplication
+
+**Objective**: Remove exact duplicates from a dataset
+
+```python
+from deduplicate_spark import create_spark_session, process_file_spark
+
+spark = create_spark_session("Exercise1")
+
+# Generate data
+# python generate_dataset.py 1000 data/exercise1.csv
+
+# Deduplicate using exact method
+stats = process_file_spark(spark, "data/exercise1.csv", method='exact')
+
+print(f"Original records: {stats['original_count']}")
+print(f"Unique records: {stats['unique_count']}")
+print(f"Duplicates removed: {stats['duplicates_removed']}")
+
+spark.stop()
 ```
 
-Access the Spark Master Web UI at: http://localhost:8080  
-Access the Spark Worker Web UI at: http://localhost:8081
+**Questions to Answer**:
+- How many duplicates were found?
+- What percentage of records were duplicates?
+- Where are the results saved?
 
-**Note**: The Docker setup uses Apache Spark 4.1.0-preview4. The first time you run `docker-compose up -d`, it will pull the pre-built Spark image.
+### Exercise 2: Compare Deduplication Methods
 
-**📖 Docker Commands Reference**: For a comprehensive guide to all Docker and docker-compose commands used in this project, see [docker_commands.md](docker_commands.md). This includes commands for managing containers, running Spark jobs, troubleshooting, and more.
+**Objective**: Compare different deduplication strategies
 
-### Using Docker
+```python
+from deduplicate_spark import create_spark_session, process_file_spark
 
-Build the Docker image:
-```bash
-docker build -t redundantspark .
+spark = create_spark_session("Exercise2")
+
+methods = ['exact', 'normalized', 'spark_hash']
+
+for method in methods:
+    print(f"\n{'='*70}")
+    print(f"Testing method: {method}")
+    print('='*70)
+    stats = process_file_spark(spark, "data/redundant_data.csv", method=method)
+    print(f"Deduplication rate: {stats['deduplication_rate']:.2f}%")
+
+spark.stop()
 ```
 
-Run the container:
-```bash
-docker run -it --rm -p 8080:8080 -p 8081:8081 -p 7077:7077 redundantspark
+**Questions to Answer**:
+- Which method removed the most duplicates?
+- Which method was fastest?
+- When would you use each method?
+
+### Exercise 3: Approximate Methods
+
+**Objective**: Use HyperLogLog for fast distinct count estimation
+
+```python
+from bloom_filter_hyperloglog import create_spark_session, hyperloglog_distinct_count
+from pyspark.sql import SparkSession
+
+spark = create_spark_session("Exercise3")
+
+# Read your data
+df = spark.read.csv("data/redundant_data.csv", header=True, inferSchema=True)
+
+# Estimate distinct count using HyperLogLog
+result = hyperloglog_distinct_count(df, column='email', rsd=0.05)
+
+print(f"Approximate distinct emails: {result['approx_distinct']:,}")
+print(f"Exact distinct emails: {result['exact_distinct']:,}")
+print(f"Error: {result['error_percent']:.2f}%")
+
+spark.stop()
 ```
 
-**Note**: The Docker image includes Apache Spark 3.3.0, so PySpark is available without additional installation.
+**Questions to Answer**:
+- How accurate is the approximation?
+- How much faster is it than exact counting?
+- When would approximate methods be useful?
 
-### Local Installation
+### Exercise 4: File-Level Deduplication
 
-For local development, you'll need to install PySpark separately:
+**Objective**: Find duplicate files by content hash
 
-```bash
-# Install PySpark (matching Spark 3.3.0)
-pip install pyspark==3.3.0
+```python
+from deduplicate_spark import create_spark_session, deduplicate_files
+import glob
+import os
 
-# Install other dependencies
-pip install -r requirements.txt
+spark = create_spark_session("Exercise4")
+
+# Find files to analyze
+file_paths = glob.glob("data/duplicatefiles/*")
+file_paths = [f for f in file_paths if os.path.isfile(f)]
+
+# Deduplicate files
+deduplicate_files(spark, file_paths, output_dir=None)
+
+spark.stop()
 ```
 
-**Note**: When using Docker, PySpark is already included in the Spark image, so you don't need to install it separately.
+**Questions to Answer**:
+- How many duplicate files were found?
+- What is the total space that could be saved?
+- How does file deduplication differ from record deduplication?
 
-## Usage
+## Available Deduplication Methods
 
-### Using Docker Compose
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| `exact` | Simple exact duplicate removal | Fastest, removes exact duplicates |
+| `normalized` | Normalize then deduplicate | Handles case/whitespace variations |
+| `spark_hash` | Hash-based deduplication | Very fast for exact duplicates |
+| `checksum_md5` | MD5 hash-based | Content-based deduplication |
+| `checksum_sha256` | SHA-256 hash-based | More secure hash-based deduplication |
+| `window` | Window-based (keep first/last) | When you need to keep specific records |
+| `lsh` | Locality-Sensitive Hashing | Scalable fuzzy matching |
 
-Execute commands in the Spark cluster:
-```bash
-# Start PySpark shell connected to the cluster
-docker-compose exec spark-master pyspark --master spark://spark-master:7077
-
-# Run Python scripts
-docker-compose exec spark-master python generate_dataset.py
-
-# Start Spark shell
-docker-compose exec spark-master spark-shell --master spark://spark-master:7077
-
-# Access bash shell
-docker-compose exec spark-master bash
-```
-
-### Using Docker
-
-Start a Spark shell:
-```bash
-docker run -it --rm -p 8080:8080 redundantspark spark-shell
-```
-
-Start a PySpark shell:
-```bash
-docker run -it --rm -p 8080:8080 redundantspark pyspark
-```
-
-Run Python scripts:
-```bash
-docker run -it --rm -v $(pwd):/app redundantspark python generate_dataset.py
-```
-
-### Local Usage
-
-```bash
-# Generate redundant dataset (CSV with duplicate records)
-python generate_dataset.py 1000 redundant_data.csv
-
-# Generate duplicate files (for testing file-level deduplication)
-python generate_duplicate_files.py 25 0.9 data/duplicatefiles
-
-# Deduplicate using Spark
-python deduplicate_spark.py redundant_data.csv output.parquet exact
-```
-
-## Data Generation
-
-### Generate CSV Dataset with Duplicates
-
-```bash
-# Generate 1000 records with ~10% duplicates
-python generate_dataset.py 1000 redundant_data.csv
-
-# Generate large dataset
-python generate_dataset.py 100000 redundant_data_large.csv
-```
-
-### Generate Duplicate Files
-
-```bash
-# Generate 25 files with 90% unique (22 unique, 3 duplicates)
-python generate_duplicate_files.py 25 0.9 data/duplicatefiles
-
-# Generate 100 files with 80% unique
-python generate_duplicate_files.py 100 0.8 data/duplicatefiles
-
-# Custom output directory
-python generate_duplicate_files.py 50 0.9 /path/to/output
-```
-
-The script creates files with random names where:
-- Files have random alphanumeric filenames
-- Content is randomly generated text
-- Duplicate files have the same content but different filenames
-- Summary shows which files are duplicates
-
-## Deduplication
-
-### Quick Start
-
-The project includes a comprehensive deduplication script with multiple strategies:
-
-```bash
-# Exact duplicate removal (fastest)
-python deduplicate_spark.py redundant_data.csv output.parquet exact
-
-# Window-based deduplication (keeps first record)
-python deduplicate_spark.py redundant_data.csv output.parquet window
-
-# Normalized deduplication (handles case/whitespace)
-python deduplicate_spark.py redundant_data.csv output.parquet normalized
-
-# Fuzzy matching with Levenshtein (expensive, for small datasets)
-python deduplicate_spark.py redundant_data.csv output.parquet fuzzy_levenshtein
-
-# Fuzzy matching with FuzzyWuzzy (expensive, for small datasets)
-python deduplicate_spark.py redundant_data.csv output.parquet fuzzy_fuzzywuzzy
-
-# Locality-Sensitive Hashing (scalable fuzzy matching)
-python deduplicate_spark.py redundant_data.csv output.parquet lsh
-
-# Checksum-based deduplication (MD5 hash)
-python deduplicate_spark.py redundant_data.csv output.parquet checksum_md5
-
-# Checksum-based deduplication (SHA-256 hash)
-python deduplicate_spark.py redundant_data.csv output.parquet checksum_sha256
-
-# Spark built-in hash function (fastest hash-based method)
-python deduplicate_spark.py redundant_data.csv output.parquet spark_hash
-
-# Partitioned hash-based deduplication (for large datasets)
-python deduplicate_spark.py redundant_data.csv output.parquet partitioned_hash
-```
-
-### Bloom Filters and HyperLogLog
-
-For approximate duplicate detection and distinct count estimation:
-
-```bash
-# Run Bloom Filter and HyperLogLog demonstrations
-python bloom_filter_hyperloglog.py
-```
-
-This script demonstrates:
-- **Bloom Filters**: Memory-efficient approximate duplicate detection
-- **HyperLogLog**: Fast distinct count estimation with minimal memory
-- **Method Comparison**: Compares approximate vs exact methods
-- **Incremental Deduplication**: Using Bloom Filters for streaming scenarios
+## Lab Resources
 
 ### Documentation
 
-**Getting Started:**
-- [Lab Guide](documents/lab_guide.md) - **Start here!** Step-by-step tutorial teaching Python and Spark for deduplication
+- **[Cloudera AI Workbench Guide](documents/CLOUDERA_AI_WORKBENCH.md)** - Complete guide for using this lab in Cloudera AI Workbench
+- **[Lab Guide](documents/lab_guide.md)** - Step-by-step tutorial teaching Python and Spark
+- **[Deduplication Guide](documents/deduplication_guide.md)** - Detailed explanation of each method
+- **[Advanced Methods](documents/advanced_deduplication_methods.md)** - Advanced techniques and best practices
+- **[Project Structure](documents/PROJECT_STRUCTURE.md)** - Project organization and file descriptions
 
-**Reference Guides:**
-- [docker_commands.md](docker_commands.md) - **Docker Commands Helper** - Complete reference for all Docker and docker-compose commands used in this project
-- [deduplication_guide.md](documents/deduplication_guide.md) - Detailed explanation of each deduplication method
-- [advanced_deduplication_methods.md](documents/advanced_deduplication_methods.md) - Advanced techniques including:
-  - Checksum/hash-based deduplication methods
-  - File-level duplicate detection
-  - Bloom filters and HyperLogLog
-  - Delta Lake deduplication
-  - Advanced techniques for large-scale deduplication
+### For Local/Docker Setup
 
-### Best Practices Summary
+If you're not using Cloudera AI Workbench, see:
+- **[Local Setup Guide](documents/LOCAL_SETUP.md)** - Setting up locally or with Docker
+- **[Docker Commands Reference](documents/docker_commands.md)** - Complete Docker reference
 
-**For exact duplicates:**
-- Use `dropDuplicates()` - simplest and fastest
-- Use `spark_hash` method for hash-based deduplication (very fast)
-- Partition by key columns for better performance
+## Output Locations
 
-**For checksum-based deduplication:**
-- Use `spark_hash` for fastest hash-based method (uses Spark's built-in MD5)
-- Use `checksum_md5` or `checksum_sha256` for content-based deduplication
-- Use `partitioned_hash` for large-scale hash-based deduplication
+In Cloudera AI Workbench:
+- **Results are saved to**: `/tmp/results/` (accessible by all Spark executors)
+- Files are automatically created with appropriate permissions
+- Use absolute paths if you need a specific location
 
-**For fuzzy duplicates:**
-- Use LSH (Locality-Sensitive Hashing) for large datasets
-- Use Levenshtein/FuzzyWuzzy only for small datasets (< 100K records)
-- Normalize data (case, whitespace) before deduplication
+## Troubleshooting
 
-**For file-level deduplication:**
-- Use the `file_level_deduplication()` function to detect duplicate files by content hash
-- Useful for detecting duplicate files in storage systems
+### Common Issues
 
-**For approximate methods (when exact accuracy isn't critical):**
-- Use **Bloom Filters** for memory-efficient duplicate detection (allows small false positive rate)
-- Use **HyperLogLog** for fast distinct count estimation (uses minimal memory)
-- Both methods are much faster and use less memory than exact methods
-- Ideal for monitoring, dashboards, and large-scale streaming scenarios
+**"A secret key must be specified"**
+- The code automatically handles this in Cloudera environments
+- If you see this error, ensure you're using the latest version of `deduplicate_spark.py`
 
-**Performance tips:**
-- Cache intermediate results if reused
-- Partition data appropriately
-- Use window functions when you need to keep specific records
-- Write results in efficient formats (Parquet, Delta)
-- Hash-based methods are faster than column-based comparisons for exact duplicates
+**"Mkdirs failed"**
+- Results are automatically written to `/tmp/results` in Cloudera
+- This path is accessible by all Spark executors
 
-## Test Results
+**File not found errors**
+- Ensure data files are accessible from the Spark driver
+- In Cloudera, you may need to use HDFS paths: `/user/username/data/file.csv`
 
-This project includes comprehensive test results demonstrating the effectiveness of various deduplication methods:
+See [CLOUDERA_AI_WORKBENCH.md](documents/CLOUDERA_AI_WORKBENCH.md) for detailed troubleshooting.
 
-### Record-Level Deduplication Results
+## Learning Objectives
 
-See [results.md](documents/results.md) for detailed test results including:
+By completing this lab, you will:
 
-- **Test Environment**: Spark 4.1.0-preview4 cluster configuration
-- **Dataset Size**: 410,000 records across multiple files
-- **Methods Tested**: 
-  - Exact deduplication (95.91% duplicate removal rate)
-  - Spark hash deduplication (5.27% duplicate removal rate)
-- **Performance Metrics**: Processing times, cluster utilization, and scalability results
-- **Comparison Analysis**: Side-by-side comparison of different deduplication strategies
+✅ Understand different deduplication strategies and when to use each  
+✅ Be able to process large datasets efficiently with Spark  
+✅ Know how to use approximate methods for memory-efficient operations  
+✅ Understand file-level vs record-level deduplication  
+✅ Be able to optimize Spark jobs for deduplication tasks  
 
-**Key Findings:**
-- Exact method removed 393,250 duplicates from 410,000 records (95.91% removal rate)
-- Spark hash method processed records faster with 5.27% removal rate
-- Both methods executed successfully on large datasets without errors
+## Next Steps
 
-### File-Level Deduplication Results
+1. Complete all exercises above
+2. Experiment with different dataset sizes
+3. Try combining multiple deduplication methods
+4. Explore the advanced methods in `documents/advanced_deduplication_methods.md`
+5. Review test results in `documents/results.md` to see performance comparisons
 
-See [file_deduplication_results.md](documents/file_deduplication_results.md) for file duplicate detection results:
+## Support
 
-- **Files Analyzed**: 25 files in test directory
-- **Results**: Identified 3 duplicate groups (6 duplicate files)
-- **Unique Files**: 22 unique files identified
-- **Space Efficiency**: 12% duplicate rate detected
-- **Methodology**: MD5 hash-based content comparison using Spark
-
-**Key Findings:**
-- Successfully identified all duplicate files by content hash
-- Efficient distributed processing of file-level deduplication
-- Demonstrated scalability for larger file collections
-
-### Approximate Methods Results
-
-See [bloom_filter_hyperloglog_results.md](documents/bloom_filter_hyperloglog_results.md) for test results on approximate duplicate detection methods:
-
-- **HyperLogLog Distinct Count Estimation**: Tested with different RSD (Relative Standard Deviation) values
-  - RSD=0.01: 1.02% error rate, ~1.12s processing time
-  - RSD=0.05: ~1-2% error rate, ~0.2s processing time (recommended)
-  - RSD=0.1: ~1-2% error rate, ~0.1s processing time
-- **Memory Efficiency**: HyperLogLog uses only ~1.5KB per counter regardless of dataset size
-- **Performance**: For large datasets, HyperLogLog can be faster than exact methods
-- **Use Cases**: Ideal for monitoring, dashboards, and memory-constrained environments
-
-**Key Findings:**
-- HyperLogLog provides accurate approximate counts (1-2% error) with minimal memory
-- RSD=0.05 provides the best balance of speed and accuracy
-- Approximate methods scale better than exact methods for very large datasets
-- Suitable for real-time analytics where approximate results are acceptable
-
-These results demonstrate the effectiveness of Spark-based deduplication for both record-level and file-level duplicate detection, as well as approximate methods for memory-efficient distinct counting in production environments.
-
-
+For issues specific to:
+- **Cloudera AI Workbench**: See [CLOUDERA_AI_WORKBENCH.md](documents/CLOUDERA_AI_WORKBENCH.md)
+- **Local/Docker setup**: See [LOCAL_SETUP.md](documents/LOCAL_SETUP.md)
+- **General questions**: Review the documentation in the `documents/` directory

@@ -59,3 +59,14 @@ deduplicated_output*.csv
 # Keep data directory structure but ignore contents
 !data/.gitkeep
 
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Results directory (Cloudera AI Workbench)
+/tmp/results/
