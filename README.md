@@ -23,7 +23,7 @@ This lab teaches you how to:
 
 Upload the following files to your Cloudera AI Workbench project:
 
-**Required Core Scripts:**
+**Required Core Scripts (in project root):**
 - `deduplicate_spark.py` - Main deduplication script
 - `generate_dataset.py` - Dataset generation script
 - `bloom_filter_hyperloglog.py` - Approximate methods demonstration
@@ -32,6 +32,8 @@ Upload the following files to your Cloudera AI Workbench project:
 **Recommended:**
 - `notebooks/` directory - Jupyter notebooks for guided exercises (recommended way to learn)
 - `examples/` directory - Example scripts for reference
+
+**Important**: The Python scripts must be in the **project root directory** (same level as the `notebooks/` folder). The notebooks will automatically add the project root to the Python path.
 
 ### Step 1a: Using Jupyter Notebooks (Recommended)
 
